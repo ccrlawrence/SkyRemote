@@ -25,7 +25,6 @@ try:
 	from SocketServer import ThreadingMixIn
 	from SimpleHTTPServer import SimpleHTTPRequestHandler
 	import threading
-	#import urlparse
 except Exception,e:
 	print 'Unmet dependency:',e
 	sys.exit(1)
