@@ -16,9 +16,11 @@ To run the script, you'll need python installed. You already have this if you're
     python skyRemote.py
 
 The commands in relation to showing pitcures are:
-    `python skyRemote.py`
-    `showpic show photo.jpg`
-    `showpic show /Users/Name/Documents/photo.png`
-    `showpic hide`
+```
+    python skyRemote.py
+    showpic show photo.jpg
+    showpic show /Users/Name/Documents/photo.png
+    showpic hide
+```
 
 Please let me know if you like it.
