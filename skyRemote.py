@@ -1,10 +1,11 @@
-#!/usr/bin/env python
 
-# Based on Craig Heffner's Miranda - http://code.google.com/p/miranda-upnp/
-# Licensed under GPL v3
+# !/usr/bin/env python
+
+#  Based on Craig Heffner's Miranda - http://code.google.com/p/miranda-upnp/
+#  Licensed under GPL v3
 
 try:
-	import sys,os
+	import sys,os,IN
 	from socket import *
 	from urllib2 import URLError, HTTPError
 	from platform import system as thisSystem
@@ -16,43 +17,52 @@ try:
 	import base64
 	import re
 	import getopt
+	from random import randint
+	import PIL
+	from PIL import Image
+	from BaseHTTPServer import BaseHTTPRequestHandler
+	from BaseHTTPServer import HTTPServer
+	from SocketServer import ThreadingMixIn
+	from SimpleHTTPServer import SimpleHTTPRequestHandler
+	import threading
+	#import urlparse
 except Exception,e:
 	print 'Unmet dependency:',e
 	sys.exit(1)
 	
-#Most of the cmdCompleter class was originally written by John Kenyan
-#It serves to tab-complete commands inside the program's shell
+# Most of the cmdCompleter class was originally written by John Kenyan
+# It serves to tab-complete commands inside the program's shell
 class cmdCompleter:
-    def __init__(self,commands):
-        self.commands = commands
+	def __init__(self,commands):
+		self.commands = commands
 
-    #Traverses the list of available commands
-    def traverse(self,tokens,tree):
-	retVal = []
+	# Traverses the list of available commands
+	def traverse(self,tokens,tree):
+		retVal = []
 
-	#If there are no commands, or no user input, return null
-	if tree is None or len(tokens) == 0:
-            return []
-	#If there is only one word, only auto-complete the primary commands
-        elif len(tokens) == 1:
-            retVal = [x+' ' for x in tree if x.startswith(tokens[0])]
-	#Else auto-complete for the sub-commands
-        elif tokens[0] in tree.keys():
-                retVal = self.traverse(tokens[1:],tree[tokens[0]])
-	return retVal
+		# If there are no commands, or no user input, return null
+		if tree is None or len(tokens) == 0:
+			return []
+		# If there is only one word, only auto-complete the primary commands
+		elif len(tokens) == 1:
+			retVal = [x+' ' for x in tree if x.startswith(tokens[0])]
+		# Else auto-complete for the sub-commands
+		elif tokens[0] in tree.keys():
+			retVal = self.traverse(tokens[1:],tree[tokens[0]])
+		return retVal
 
-    #Returns a list of possible commands that match the partial command that the user has entered
-    def complete(self,text,state):
-        try:
-            tokens = readline.get_line_buffer().split()
-            if not tokens or readline.get_line_buffer()[-1] == ' ':
-                tokens.append('')
-            results = self.traverse(tokens,self.commands) + [None]
-            return results[state]
-        except:
-            return
-            
-#UPNP class for getting, sending and parsing SSDP/SOAP XML data (among other things...)
+	# Returns a list of possible commands that match the partial command that the user has entered
+	def complete(self,text,state):
+		try:
+			tokens = readline.get_line_buffer().split()
+			if not tokens or readline.get_line_buffer()[-1] == ' ':
+				tokens.append('')
+			results = self.traverse(tokens,self.commands) + [None]
+			return results[state]
+		except:
+			return
+
+# UPNP class for getting, sending and parsing SSDP/SOAP XML data (among other things...)
 class upnp:
 	ip = False
 	port = False
@@ -86,7 +96,7 @@ class upnp:
 		else:
 			self.soapEnd = re.compile('<\/.*:envelope>')
 
-	#Initialize default sockets
+	# Initialize default sockets
 	def initSockets(self,ip,port,iface):
 		if self.csock:
 			self.csock.close()
@@ -96,25 +106,25 @@ class upnp:
 		if iface != None:
 			self.IFACE = iface
 		if not ip:
-                	ip = self.DEFAULT_IP
-                if not port:
-                	port = self.DEFAULT_PORT
-                self.port = port
-                self.ip = ip
+			ip = self.DEFAULT_IP
+		if not port:
+			port = self.DEFAULT_PORT
+		self.port = port
+		self.ip = ip
 		
 		try:
-			#This is needed to join a multicast group
+			#  This is needed to join a multicast group
 			self.mreq = struct.pack("4sl",inet_aton(ip),INADDR_ANY)
 
-			#Set up client socket
+			#  Set up client socket
 			self.csock = socket(AF_INET,SOCK_DGRAM)
 			self.csock.setsockopt(IPPROTO_IP,IP_MULTICAST_TTL,2)
 			
-			#Set up server socket
+			#  Set up server socket
 			self.ssock = socket(AF_INET,SOCK_DGRAM,IPPROTO_UDP)
 			self.ssock.setsockopt(SOL_SOCKET,SO_REUSEADDR,1)
 			
-			#Only bind to this interface
+			#  Only bind to this interface
 			if self.IFACE != None:
 				print '\nBinding to interface',self.IFACE,'...\n'
 				self.ssock.setsockopt(SOL_SOCKET,IN.SO_BINDTODEVICE,struct.pack("%ds" % (len(self.IFACE)+1,), self.IFACE))
@@ -133,16 +143,16 @@ class upnp:
 			return False
 		return True
 
-	#Clean up file/socket descriptors
+	#  Clean up file/socket descriptors
 	def cleanup(self):
 		if self.LOG_FILE != False:
 			self.LOG_FILE.close()
 		self.csock.close()
 		self.ssock.close()
 
-	#Send network data
+	#  Send network data
 	def send(self,data,socket):
-		#By default, use the client socket that's part of this class
+		#  By default, use the client socket that's part of this class
 		if socket == False:
 			socket = self.csock
 		try:
@@ -152,7 +162,7 @@ class upnp:
 			print "SendTo method failed for %s:%d : %s" % (self.ip,self.port,e)
 			return False
 
-	#Listen for network data
+	#  Listen for network data
 	def listen(self,size,socket):
 		if socket == False:
 			socket = self.ssock
@@ -162,7 +172,7 @@ class upnp:
 		except:
 			return False
 
-	#Create new UDP socket on ip, bound to port
+	#  Create new UDP socket on ip, bound to port
 	def createNewListener(self,ip,port):
 		try:
 			newsock = socket(AF_INET,SOCK_DGRAM,IPPROTO_UDP)
@@ -172,32 +182,32 @@ class upnp:
 		except:
 			return False
 
-	#Return the class's primary server socket
+	#  Return the class's primary server socket
 	def listener(self):
 		return self.ssock
 
-	#Return the class's primary client socket
+	#  Return the class's primary client socket
 	def sender(self):
 		return self.csock
 
-	#Parse a URL, return the host and the page
+	#  Parse a URL, return the host and the page
 	def parseURL(self,url):
 		delim = '://'
 		host = False
 		page = False
 
-		#Split the host and page
+		#  Split the host and page
 		try:
 			(host,page) = url.split(delim)[1].split('/',1)
 			page = '/' + page
 		except:
-			#If '://' is not in the url, then it's not a full URL, so assume that it's just a relative path
+			#  If '://' is not in the url, then it's not a full URL, so assume that it's just a relative path
 			page = url
 
 		return (host,page)
 
-	#Pull the name of the device type from a device type string
-	#The device type string looks like: 'urn:schemas-upnp-org:device:WANDevice:1'
+	#  Pull the name of the device type from a device type string
+	#  The device type string looks like: 'urn:schemas-upnp-org:device:WANDevice:1'
 	def parseDeviceTypeName(self,string):
 		delim1 = 'device:'
 		delim2 = ':'
@@ -206,8 +216,8 @@ class upnp:
 			return string.split(delim1)[1].split(delim2,1)[0]
 		return False
 
-	#Pull the name of the service type from a service type string
-	#The service type string looks like: 'urn:schemas-upnp-org:service:Layer3Forwarding:1'
+	# Pull the name of the service type from a service type string
+	# The service type string looks like: 'urn:schemas-upnp-org:service:Layer3Forwarding:1'
 	def parseServiceTypeName(self,string):
 		delim1 = 'service:'
 		delim2 = ':'
@@ -216,7 +226,7 @@ class upnp:
 			return string.split(delim1)[1].split(delim2,1)[0]
 		return False
 
-	#Pull the header info for the specified HTTP header - case insensitive
+	# Pull the header info for the specified HTTP header - case insensitive
 	def parseHeader(self,data,header):
 		delimiter = "%s:" % header
 		defaultRet = False
@@ -224,10 +234,10 @@ class upnp:
 		lowerDelim = delimiter.lower()
 		dataArray = data.split("\r\n")
 	
-		#Loop through each line of the headers
+		# Loop through each line of the headers
 		for line in dataArray:
 			lowerLine = line.lower()
-			#Does this line start with the header we're looking for?
+			# Does this line start with the header we're looking for?
 			if lowerLine.startswith(lowerDelim):
 				try:
 					return line.split(':',1)[1].strip()
@@ -235,7 +245,7 @@ class upnp:
 					print "Failure parsing header data for %s" % header
 		return defaultRet
 
-	#Extract the contents of a single XML tag from the data
+	# Extract the contents of a single XML tag from the data
 	def extractSingleTag(self,data,tag):
 		startTag = "<%s" % tag
 		endTag = "</%s>" % tag
@@ -250,7 +260,7 @@ class upnp:
 			pass
 		return None
 
-	#Parses SSDP notify and reply packets, and populates the ENUM_HOSTS dict
+	# Parses SSDP notify and reply packets, and populates the ENUM_HOSTS dict
 	def parseSSDPInfo(self,data,showUniq,verbose):
 		hostFound = False
 		foundLocation = False
@@ -260,38 +270,38 @@ class upnp:
 		page = False
 		upnpType = None
 		knownHeaders = {
-				'NOTIFY' : 'notification',
-				'HTTP/1.1 200 OK' : 'reply'
+			'NOTIFY' : 'notification',
+			'HTTP/1.1 200 OK' : 'reply'
 		}
 
-		#Use the class defaults if these aren't specified
+		# Use the class defaults if these aren't specified
 		if showUniq == False:
 			showUniq = self.UNIQ
 		if verbose == False:
 			verbose = self.VERBOSE
 
-		#Is the SSDP packet a notification, a reply, or neither?
+		# Is the SSDP packet a notification, a reply, or neither?
 		for text,messageType in knownHeaders.iteritems():
 			if data.upper().startswith(text):
 				break
 			else:
 				messageType = False
 
-		#If this is a notification or a reply message...
+		# If this is a notification or a reply message...
 		if messageType != False:
-			#Get the host name and location of it's main UPNP XML file
+			# Get the host name and location of it's main UPNP XML file
 			xmlFile = self.parseHeader(data,"LOCATION")
 			upnpType = self.parseHeader(data,"SERVER")
 			
 			(host,page) = self.parseURL(xmlFile)
 			
 			if upnpType.find('SKY') == -1:
-			 return False
-			 
-			#Update xmlFile to be description0.xml. Sky has two service points, and for now we only support the SkyPlay endpoint
-			xmlFile = "http://"+host+"/description0.xml"
-			   
-			#Sanity check to make sure we got all the info we need
+				return False
+
+			# Update xmlFile to be description0.xml. Sky has two service points, and for now we only support the SkyPlay endpoint
+			xmlFile = "http://"+host+"/description3.xml"
+
+			# Sanity check to make sure we got all the info we need
 			if xmlFile == False or host == False or page == False:
 				print 'ERROR parsing recieved header:'
 				print self.STARS
@@ -300,12 +310,12 @@ class upnp:
 				print ''
 				return False
 
-			#Get the protocol in use (i.e., http, https, etc)
+			# Get the protocol in use (i.e., http, https, etc)
 			protocol = xmlFile.split('://')[0]+'://'
 
-			#Check if we've seen this host before; add to the list of hosts if:
-			#	1. This is a new host
-			#	2. We've already seen this host, but the uniq hosts setting is disabled
+			# Check if we've seen this host before; add to the list of hosts if:
+			# 	1. This is a new host
+			# 	2. We've already seen this host, but the uniq hosts setting is disabled
 			for hostID,hostInfo in self.ENUM_HOSTS.iteritems():
 				if hostInfo['name'] == host:
 					hostFound = True
@@ -313,7 +323,7 @@ class upnp:
 						return False
 
 			if (hostFound and not self.UNIQ) or not hostFound:
-				#Get the new host's index number and create an entry in ENUM_HOSTS
+				# Get the new host's index number and create an entry in ENUM_HOSTS
 				index = len(self.ENUM_HOSTS)
 				self.ENUM_HOSTS[index] = {
 								'name' : host,
@@ -324,33 +334,33 @@ class upnp:
 								'upnpServer' : upnpType,
 								'deviceList' : {}
 							}
-				#Be sure to update the command completer so we can tab complete through this host's data structure
+				# Be sure to update the command completer so we can tab complete through this host's data structure
 				self.updateCmdCompleter(self.ENUM_HOSTS)
 
-			#Print out some basic device info
+			# Print out some basic device info
 			print "Found a Sky Box at "+host[:-6]
 			return "complete"
 
-	#Send GET request for a UPNP XML file
+	# Send GET request for a UPNP XML file
 	def getXML(self,url):
 
 		headers = {
-                            'USER-AGENT':'SKY_skyplus',
-                            'CONTENT-TYPE':'text/xml; charset="utf-8"'
-                }
+			'USER-AGENT':'SKY_skyplus',
+			'CONTENT-TYPE':'text/xml; charset="utf-8"'
+		}
 
-                try:
-			#Use urllib2 for the request, it's awesome
-                        req = urllib2.Request(url, None, headers)
-                        response = urllib2.urlopen(req)
-                        output = response.read()
+		try:
+			# Use urllib2 for the request, it's awesome
+			req = urllib2.Request(url, None, headers)
+			response = urllib2.urlopen(req)
+			output = response.read()
 			headers = response.info()
 			return (headers,output)
-		except Exception, e:
+		except Exception as e:
 			print "Request for '%s' failed: %s" % (url,e)
 			return (False,False)
 
-	#Send SOAP request
+	# Send SOAP request
 	def sendSOAP(self,hostName,serviceType,controlURL,actionName,actionArguments):
 		argList = ''
 		soapResponse = ''
@@ -365,7 +375,7 @@ class upnp:
 
 		soapRequest = 'POST %s HTTP/1.1\r\n' % controlURL
 
-		#Check if a port number was specified in the host name; default is port 80
+		# Check if a port number was specified in the host name; default is port 80
 		if ':' in hostName:
 			hostNameArray = hostName.split(':')
 			host = hostNameArray[0]
@@ -378,11 +388,11 @@ class upnp:
 			host = hostName
 			port = 80
 
-		#Create a string containing all of the SOAP action's arguments and values
+		# Create a string containing all of the SOAP action's arguments and values
 		for arg,(val,dt) in actionArguments.iteritems():
 			argList += '<%s>%s</%s>' % (arg,val,arg)
 
-		#Create the SOAP request
+		# Create the SOAP request
 		soapBody = 	'<?xml version="1.0" encoding="utf-8"?>'\
 				'<s:Envelope s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/" xmlns:s="http://schemas.xmlsoap.org/soap/envelope/">'\
 				'<s:Body>'\
@@ -395,28 +405,28 @@ class upnp:
 
 		actualServiceType = serviceType[:-2] + "2:2"
 
-		#Specify the headers to send with the request
+		# Specify the headers to send with the request
 		headers = 	{
 				'Host':hostName[:-6],
 				'Content-Length':len(soapBody),
 				'Content-Type':'text/xml; charset="utf-8"',
 				'User-Agent':'SKY_skyplus',
-				'SOAPACTION':'"%s#%s"' % (actualServiceType,actionName),
+				'SOAPACTION':'"%s# %s"' % (actualServiceType,actionName),
 				'connection':'close'
 				}
 		
 
-		#Generate the final payload
+		# Generate the final payload
 		for head,value in headers.iteritems():
 			soapRequest += '%s: %s\r\n' % (head,value)
 		soapRequest += '\r\n%s' % soapBody
 		
-		#Send data and go into recieve loop
+		# Send data and go into recieve loop
 		try:
-                        sock = socket(AF_INET,SOCK_STREAM)
-                        sock.connect((host,port))
-                        sock.send(soapRequest)
-                        while True:
+			sock = socket(AF_INET,SOCK_STREAM)
+			sock.connect((host,port))
+			sock.send(soapRequest)
+			while True:
 				data = sock.recv(self.MAX_RECV)
 				if not data:
 					break
@@ -424,7 +434,7 @@ class upnp:
 					soapResponse += data
 					if self.soapEnd.search(soapResponse.lower()) != None:
 						break
-                        sock.close()
+			sock.close()
 	
 			(header,body) = soapResponse.split('\r\n\r\n',1)
 
@@ -436,16 +446,16 @@ class upnp:
 				return False
 			else:
 				return body
-                except Exception, e:
-                        print 'Caught socket exception:',e
-                        sock.close()
-                        return False
-                except KeyboardInterrupt:
-                        sock.close()
+		except Exception, e:
+			print 'Caught socket exception:', e
+			sock.close()
+			return False
+		except KeyboardInterrupt:
+			sock.close()
 			return False
 
 
-	#Display all info for a given host
+	# Display all info for a given host
 	def showCompleteHostInfo(self,index,fp):
 		na = 'N/A'
 		serviceKeys = ['controlURL','eventSubURL','serviceId','SCPDURL','fullName']
@@ -485,7 +495,7 @@ class upnp:
 		except Exception, e:
 			print 'Caught exception while showing host info:',e
 
-	#Wrapper function...
+	# Wrapper function...
 	def getHostInfo(self,xmlData,xmlHeaders,index):
 		if self.ENUM_HOSTS[index]['dataComplete'] == True:
 			return
@@ -501,7 +511,7 @@ class upnp:
 				print 'Caught exception while getting host info:',e
 		return False
 
-	#Parse device info from the retrieved XML file
+	# Parse device info from the retrieved XML file
 	def parseDeviceInfo(self,xmlRoot,index):
 		deviceEntryPointer = False
 		devTag = "device"
@@ -509,24 +519,24 @@ class upnp:
 		deviceListEntries = "deviceList"
 		deviceTags = ["friendlyName","modelDescription","modelName","modelNumber","modelURL","presentationURL","UDN","UPC","manufacturer","manufacturerURL"]
 
-		#Find all device entries listed in the XML file
+		# Find all device entries listed in the XML file
 		for device in xmlRoot.getElementsByTagName(devTag):
 			try:
-				#Get the deviceType string
+				# Get the deviceType string
 				deviceTypeName = str(device.getElementsByTagName(deviceType)[0].childNodes[0].data)
 			except:
 				continue
 
-			#Pull out the action device name from the deviceType string
+			# Pull out the action device name from the deviceType string
 			deviceDisplayName = self.parseDeviceTypeName(deviceTypeName)
 			if not deviceDisplayName:
 				continue
 
-			#Create a new device entry for this host in the ENUM_HOSTS structure
+			# Create a new device entry for this host in the ENUM_HOSTS structure
 			deviceEntryPointer = self.ENUM_HOSTS[index][deviceListEntries][deviceDisplayName] = {}
 			deviceEntryPointer['fullName'] = deviceTypeName
 
-			#Parse out all the device tags for that device
+			# Parse out all the device tags for that device
 			for tag in deviceTags:
 				try:
 					deviceEntryPointer[tag] = str(device.getElementsByTagName(tag)[0].childNodes[0].data)
@@ -534,12 +544,12 @@ class upnp:
 					if self.VERBOSE:
 						print 'Device',deviceEntryPointer['fullName'],'does not have a',tag
 					continue
-			#Get a list of all services for this device listing
+			# Get a list of all services for this device listing
 			self.parseServiceList(device,deviceEntryPointer,index)
 
 		return
 
-	#Parse the list of services specified in the XML file
+	# Parse the list of services specified in the XML file
 	def parseServiceList(self,xmlRoot,device,index):
 		serviceEntryPointer = False
 		dictName = "services"
@@ -550,30 +560,30 @@ class upnp:
 
 		try:
 			device[dictName] = {}
-			#Get a list of all services offered by this device
+			# Get a list of all services offered by this device
 			for service in xmlRoot.getElementsByTagName(serviceListTag)[0].getElementsByTagName(serviceTag):
-				#Get the full service descriptor
+				# Get the full service descriptor
 				serviceName = str(service.getElementsByTagName(serviceNameTag)[0].childNodes[0].data)
 
-				#Get the service name from the service descriptor string
+				# Get the service name from the service descriptor string
 				serviceDisplayName = self.parseServiceTypeName(serviceName)
 				if not serviceDisplayName:
 					continue
 
-				#Create new service entry for the device in ENUM_HOSTS
+				# Create new service entry for the device in ENUM_HOSTS
 				serviceEntryPointer = device[dictName][serviceDisplayName] = {}
 				serviceEntryPointer['fullName'] = serviceName
 
-				#Get all of the required service info and add it to ENUM_HOSTS
+				# Get all of the required service info and add it to ENUM_HOSTS
 				for tag in serviceTags:
 					serviceEntryPointer[tag] = str(service.getElementsByTagName(tag)[0].childNodes[0].data)
 
-				#Get specific service info about this service
+				# Get specific service info about this service
 				self.parseServiceInfo(serviceEntryPointer,index)
 		except Exception, e:
 			print 'Caught exception while parsing device service list:',e
 
-	#Parse details about each service (arguements, variables, etc)
+	# Parse details about each service (arguements, variables, etc)
 	def parseServiceInfo(self,service,index):
 		argIndex = 0
 		argTags = ['direction','relatedStateVariable']
@@ -583,7 +593,7 @@ class upnp:
 		argumentList = 'argumentList'
 		argumentTag = 'argument'
 
-		#Get the full path to the service's XML file
+		# Get the full path to the service's XML file
 		xmlFile = self.ENUM_HOSTS[index]['proto'] + self.ENUM_HOSTS[index]['name']
 		if not xmlFile.endswith('/') and not service['SCPDURL'].startswith('/'):
 			xmlFile += '/'
@@ -593,7 +603,7 @@ class upnp:
 			xmlFile += service['SCPDURL']
 		service['actions'] = {}
 
-		#Get the XML file that describes this service
+		# Get the XML file that describes this service
 		(xmlHeaders,xmlData) = self.getXML(xmlFile)
 		if not xmlData:
 			print 'Failed to retrieve service descriptor located at:',xmlFile
@@ -602,7 +612,7 @@ class upnp:
 		try:
 			xmlRoot = minidom.parseString(xmlData)	
 
-			#Get a list of actions for this service
+			# Get a list of actions for this service
 			try:
 				actionList = xmlRoot.getElementsByTagName(actionList)[0]
 			except:
@@ -613,34 +623,34 @@ class upnp:
 				print 'Failed to retrieve actions from service actions list for service %s!' % service['fullName']
 				return False
 
-			#Parse all actions in the service's action list
+			# Parse all actions in the service's action list
 			for action in actions:
-				#Get the action's name
+				# Get the action's name
 				try:
 					actionName = str(action.getElementsByTagName(nameTag)[0].childNodes[0].data).strip()
 				except:
 					print 'Failed to obtain service action name (%s)!' % service['fullName']
 					continue
 			
-				#Add the action to the ENUM_HOSTS dictonary
+				# Add the action to the ENUM_HOSTS dictonary
 				service['actions'][actionName] = {}
 				service['actions'][actionName]['arguments'] = {}
 	
-				#Parse all of the action's arguments
+				# Parse all of the action's arguments
 				try:
 					argList = action.getElementsByTagName(argumentList)[0]
 				except:
-					#Some actions may take no arguments, so continue without raising an error here...
+					# Some actions may take no arguments, so continue without raising an error here...
 					continue
 
-				#Get all the arguments in this action's argument list
+				# Get all the arguments in this action's argument list
 				arguments = argList.getElementsByTagName(argumentTag)
 				if arguments == []:
 					if self.VERBOSE:
 						print 'Action',actionName,'has no arguments!'
 					continue
 				
-				#Loop through the action's arguments, appending them to the ENUM_HOSTS dictionary
+				# Loop through the action's arguments, appending them to the ENUM_HOSTS dictionary
 				for argument in arguments:
 					try:
 						argName = str(argument.getElementsByTagName(nameTag)[0].childNodes[0].data)
@@ -649,7 +659,7 @@ class upnp:
 						continue
 					service['actions'][actionName]['arguments'][argName] = {}
 
-					#Get each required argument tag value and add them to ENUM_HOSTS
+					# Get each required argument tag value and add them to ENUM_HOSTS
 					for tag in argTags:
 						try:
 							service['actions'][actionName]['arguments'][argName][tag] = str(argument.getElementsByTagName(tag)[0].childNodes[0].data)
@@ -657,7 +667,7 @@ class upnp:
 							print 'Failed to find tag %s for argument %s!' % (tag,argName)
 							continue
 
-			#Parse all of the state variables for this service					
+			# Parse all of the state variables for this service					
 			self.parseServiceStateVars(xmlRoot,service)
 
 		except Exception, e:
@@ -666,7 +676,7 @@ class upnp:
 
 		return True
 
-	#Get info about a service's state variables
+	# Get info about a service's state variables
 	def parseServiceStateVars(self,xmlRoot,servicePointer):
 
 		na = 'N/A'
@@ -682,20 +692,20 @@ class upnp:
 		minimum = 'minimum'
 		maximum = 'maximum'
 
-		#Create the serviceStateVariables entry for this service in ENUM_HOSTS
+		# Create the serviceStateVariables entry for this service in ENUM_HOSTS
 		servicePointer['serviceStateVariables'] = {}
 
-		#Get a list of all state variables associated with this service
+		# Get a list of all state variables associated with this service
 		try:
 			stateVars = xmlRoot.getElementsByTagName(serviceStateTable)[0].getElementsByTagName(stateVariable)
 		except:
-			#Don't necessarily want to throw an error here, as there may be no service state variables
+			# Don't necessarily want to throw an error here, as there may be no service state variables
 			return False
 
-		#Loop through all state variables
+		# Loop through all state variables
 		for var in stateVars:
 			for tag in varVals:
-				#Get variable name
+				# Get variable name
 				try:
 					varName = str(var.getElementsByTagName(nameTag)[0].childNodes[0].data)
 				except:
@@ -714,23 +724,23 @@ class upnp:
 
 				servicePointer['serviceStateVariables'][varName][allowedValueList] = []					
 
-				#Get a list of allowed values for this variable
+				# Get a list of allowed values for this variable
 				try:
 					vals = var.getElementsByTagName(allowedValueList)[0].getElementsByTagName(allowedValue)
 				except:
 					pass
 				else:
-					#Add the list of allowed values to the ENUM_HOSTS dictionary
+					# Add the list of allowed values to the ENUM_HOSTS dictionary
 					for val in vals:
 						servicePointer['serviceStateVariables'][varName][allowedValueList].append(str(val.childNodes[0].data))
 				
-				#Get allowed value range for this variable
+				# Get allowed value range for this variable
 				try:
 					valList = var.getElementsByTagName(allowedValueRange)[0]
 				except:
 					pass
 				else:
-					#Add the max and min values to the ENUM_HOSTS dictionary
+					# Add the max and min values to the ENUM_HOSTS dictionary
 					servicePointer['serviceStateVariables'][varName][allowedValueRange] = []
 					try:
 						servicePointer['serviceStateVariables'][varName][allowedValueRange].append(str(valList.getElementsByTagName(minimum)[0].childNodes[0].data))
@@ -739,7 +749,7 @@ class upnp:
 						pass
 		return True			
 
-	#Update the command completer
+	# Update the command completer
 	def updateCmdCompleter(self,struct):
 		indexOnlyList = {
 				'host' : ['get','details','summary'],
@@ -756,17 +766,17 @@ class upnp:
 				structPtr[str(key)] = val
 				topLevelKeys[str(key)] = None
 			
-			#Update the subCommandList
+			# Update the subCommandList
 			for subcmd in subCommandList:
 				self.completer.commands[hostCommand][subcmd] = None
 				self.completer.commands[hostCommand][subcmd] = structPtr
 
-			#Update the indexOnlyList
+			# Update the indexOnlyList
 			for cmd,data in indexOnlyList.iteritems():
 				for subcmd in data:
 					self.completer.commands[cmd][subcmd] = topLevelKeys
 
-			#This is for updating the sendCommand key
+			# This is for updating the sendCommand key
 			structPtr = {}
 			for hostIndex,hostData in struct.iteritems():
 				host = str(hostIndex)
@@ -785,13 +795,13 @@ class upnp:
 			print "Error updating command completer structure; some command completion features might not work..."
 		return
 		
-################## Action Functions ######################
-#These functions handle user commands from the shell
+# # # # # # # # # # # # # # # # # #  Action Functions # # # # # # # # # # # # # # # # # # # # # # 
+# These functions handle user commands from the shell
 
-#Actively search for UPNP devices
+# Actively search for UPNP devices
 def msearch(argc,argv,hp):
 	defaultST = "upnp:rootdevice"
-	#Fix coda "
+	# Fix coda "
 	st = "schemas-upnp-org"
 	myip = ''
 	lport = hp.port
@@ -808,7 +818,7 @@ def msearch(argc,argv,hp):
 	else:
 		st = defaultST
 
-	#Build the request
+	# Build the request
 	request = 	"M-SEARCH * HTTP/1.1\r\n"\
 			"HOST:%s:%d\r\n"\
 			"ST:%s\r\n" % (hp.ip,hp.port,st)
@@ -819,7 +829,7 @@ def msearch(argc,argv,hp):
 	print "Entering discovery mode for '%s', Ctl+C to stop..." % st
 	print ''
 		
-	#Have to create a new socket since replies will be sent directly to our IP, not the multicast IP
+	# Have to create a new socket since replies will be sent directly to our IP, not the multicast IP
 	server = hp.createNewListener(myip,lport)
 	if server == False:
 		print 'Failed to bind port %d' % lport
@@ -833,7 +843,7 @@ def msearch(argc,argv,hp):
 			print 'Discover mode halted...'
 			break
 
-#Passively listen for UPNP NOTIFY packets
+# Passively listen for UPNP NOTIFY packets
 def pcap(argc,argv,hp):
 	print 'Waiting for Sky+HD Box. This may take up to 30 seconds...'
 	search = True
@@ -841,21 +851,21 @@ def pcap(argc,argv,hp):
 		try:
 			result = hp.parseSSDPInfo(hp.listen(1024,False),False,False)
 			if result == 'complete':
-			 search = False
+				search = False
 		except Exception, e:
 			print "Search halted..."
 			break
 
-#Manipulate M-SEARCH header values
+# Manipulate M-SEARCH header values
 def head(argc,argv,hp):
 	if argc >= 2:
 		action = argv[1]
-		#Show current headers
+		# Show current headers
 		if action == 'show':
 			for header,value in hp.msearchHeaders.iteritems():
 				print header,':',value
 			return
-		#Delete the specified header
+		# Delete the specified header
 		elif action == 'del':
 			if argc == 3:
 				header = argv[2]
@@ -866,7 +876,7 @@ def head(argc,argv,hp):
 				else:
 					print '%s is not in the current header list' % header
 					return
-		#Create/set a headers
+		# Create/set a headers
 		elif action == 'set':
 			if argc == 4:
 				header = argv[2]
@@ -877,7 +887,7 @@ def head(argc,argv,hp):
 
 	showHelp(argv[0])
 
-#Manipulate application settings
+# Manipulate application settings
 def seti(argc,argv,hp):
 	if argc >= 2:
 		action = argv[1]
@@ -940,7 +950,7 @@ def seti(argc,argv,hp):
 	showHelp(argv[0])
 	return
 
-#Host command. It's kind of big.
+# Host command. It's kind of big.
 def host(argc,argv,hp):
 
 	indexList = []
@@ -969,7 +979,7 @@ def host(argc,argv,hp):
 				hostInfo = hp.ENUM_HOSTS[index]
 
 				try:
-					#If this host data is already complete, just display it
+					# If this host data is already complete, just display it
 					if hostInfo['dataComplete'] == True:
 						hp.showCompleteHostInfo(index,False)
 					else:
@@ -1038,13 +1048,13 @@ def host(argc,argv,hp):
 				else:
 					hostInfo = hp.ENUM_HOSTS[index]
 
-					#If this host data is already complete, just display it
+					# If this host data is already complete, just display it
 					if hostInfo['dataComplete'] == True:
 						print 'Data for this host has already been enumerated!'
 						return
 
 					try:
-						#Get extended device and service information
+						# Get extended device and service information
 						if hostInfo != False:
 							print "Loading Sky+HD box info for %s (this could take a few seconds)..." % hostInfo['name']
 							if hostInfo['dataComplete'] == False:
@@ -1062,7 +1072,7 @@ def host(argc,argv,hp):
 						return
 
 		elif action == 'send':
-			#Send SOAP requests
+			# Send SOAP requests
 			index = False
 			inArgCounter = 0
 
@@ -1085,7 +1095,7 @@ def host(argc,argv,hp):
 				controlURL = False
 				fullServiceName = False
 
-				#Get the service control URL and full service name
+				# Get the service control URL and full service name
 				try:
 					controlURL = hostInfo['proto'] + hostInfo['name']
 					controlURL2 = hostInfo['deviceList'][deviceName]['services'][serviceName]['controlURL']
@@ -1097,7 +1107,7 @@ def host(argc,argv,hp):
 					print "Are you sure you've run 'host get %d' and specified the correct service name?" % index
 					return False
 
-				#Get action info
+				# Get action info
 				try:
 					actionArgs = hostInfo['deviceList'][deviceName]['services'][serviceName]['actions'][actionName]['arguments']
 					fullServiceName = hostInfo['deviceList'][deviceName]['services'][serviceName]['fullName']
@@ -1125,7 +1135,7 @@ def host(argc,argv,hp):
 								print "\tDefault Value: ",stateVar['defaultValue']
 							prompt = "\tSet %s value to: " % argName
 						try:
-							#Get user input for the argument value
+							# Get user input for the argument value
 							if argName == "InstanceID":
 								argc = 1
 								argv = ["0"]
@@ -1154,15 +1164,15 @@ def host(argc,argv,hp):
 					else:
 						retTags.append((argName,stateVar['dataType']))
 
-				#Remove the above inputs from the command history				
+				# Remove the above inputs from the command history				
 				while inArgCounter:
 					readline.remove_history_item(readline.get_current_history_length()-1)
 					inArgCounter -= 1
 
-				#print 'Requesting',controlURL
+				# print 'Requesting',controlURL
 				soapResponse = hp.sendSOAP(hostInfo['name'],fullServiceName,controlURL,actionName,sendArgs)
 				if soapResponse != False:
-					#It's easier to just parse this ourselves...
+					# It's easier to just parse this ourselves...
 					for (tag,dataType) in retTags:
 						tagValue = hp.extractSingleTag(soapResponse,tag)
 						if dataType == 'bin.base64' and tagValue != None:
@@ -1174,7 +1184,7 @@ def host(argc,argv,hp):
 	showHelp(argv[0])
 	return
 
-#Save data
+# Save data
 def save(argc,argv,hp):
 	suffix = '%s_%s.mir'
 	uniqName = ''
@@ -1239,14 +1249,14 @@ def save(argc,argv,hp):
 	
 	return	
 	
-#Parse control data
+# Parse control data
 def control(argc,argv,hp):
-  ptr = eval("host")
-  args = ['host','send','0','SkyControl','SkyPlay',argv[1].capitalize()]
-  ptr(6,args,hp)
-  print "Sent "+argv[1].capitalize()+" command"
+	ptr = eval("host")
+	args = ['host','send','0','SkyControl','SkyPlay',argv[1].capitalize()]
+	ptr(6,args,hp)
+	print "Sent "+argv[1].capitalize()+" command"
 
-#Load data
+# Load data
 def load(argc,argv,hp):
 	if argc == 2 and argv[1] != 'help':
 		loadFile = argv[1]
@@ -1266,7 +1276,216 @@ def load(argc,argv,hp):
 
 	showHelp(argv[0])
 
-#Open log file
+class PicHandler(BaseHTTPRequestHandler):
+	im = None
+
+	def setimage(self, image):
+		self.im = image
+
+	def do_GET(self):
+		# parsed_path = urlparse.urlparse(self.path)
+
+		try:
+			message_parts = ["Content-Length: %d" % self.im.tell(),""]
+			print message_parts
+		except:
+			return False
+
+		self.im.seek(0)
+		message_parts.append(self.im.read())
+		message_parts.append("")
+		message = '\r\n'.join(message_parts)
+		self.send_response(200)
+		self.send_header("User-Agent", "SkyPlus/222884 CFNetwork/711.1.12 Darwin/14.0.0")
+		self.server_version = ""
+		self.end_headers()
+		self.wfile.write(message)
+		return
+
+class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
+	assert True
+
+# Show picture
+def showpic(argc,argv,hp):
+	if argc >= 3 and argv[1] == 'show':
+
+		try:
+			index = int(argv[3])
+		except:
+			index = 0
+
+		hostInfo = hp.ENUM_HOSTS[index]
+
+		# Try to get the image
+		try:
+			im = Image.open(os.path.abspath(argv[2]))
+		except Exception,e:
+			print 'Caught exception:',e
+			print "Are you sure %s exists?" % argv[2]
+			return False
+
+		# Resize image to max 1280x720
+		im.thumbnail((1280,720))
+
+		# Create background image and paste on
+		sendimage = Image.new("RGB", (1280,720))
+		pos = (int((1280-im.size[0])/2),0)
+		sendimage.paste(im,pos)
+
+		# Get the service control URL and full service name
+		try:
+			controlURL = hostInfo['proto'] + hostInfo['name']
+		except Exception,e:
+			print 'Caught exception:',e
+			print "Are you sure you've run 'host get %d' and specified the correct service name?" % index
+			return False
+
+		host = hostInfo['name'].split(':')[0]
+
+		# Create a random file number
+		rand = randint(100000000,999999999)
+
+		PicHandler.im = open('photo-{0}'.format(rand),'w+b')
+		sendimage.save(PicHandler.im, 'jpeg')
+
+		# Get iface ip address to Sky+ box
+		try:
+			tempsock = socket(AF_INET, SOCK_STREAM)
+			tempsock.connect((host, 49159))
+			serverip = tempsock.getsockname()[0]
+			tempsock.close()
+		except Exception, e:
+			print 'Caught socket exception:', e
+			tempsock.close()
+			return False
+
+		# Start a threaded HTTP Server to serve the photo
+		server = ThreadedHTTPServer((serverip, 0), SimpleHTTPRequestHandler)
+		server_thread = threading.Thread(target=server.serve_forever)
+		server_thread.daemon = True
+		server_thread.start()
+
+		print server.server_address[0]
+
+		request = "GET /photo-viewing/start?uri=http://{0}:{1}/photo-{2} HTTP/1.1\r\n".format(server.server_address[0], server.server_address[1], rand)
+		request = request + "Host: " + hostInfo['name'].split(':')[0] + '\r\n\r\n'
+		response = ''
+
+		# Send data and go into receive loop
+		try:
+			sock = socket(AF_INET,SOCK_STREAM)
+			# Not advertised
+			sock.connect((host,49159))
+			sock.send(request)
+			while True:
+				data = sock.recv(upnp.MAX_RECV)
+				if not data:
+					break
+				else:
+					response += data
+					if response.count('\r\n\r\n') > 0:
+						break
+			sock.close()
+
+			(header,body) = response.split('\r\n\r\n',1)
+
+			if not header.upper().startswith('HTTP/1.1 200'):
+				print 'Show picture failed with error code:',header.split('\r\n')[0].split(' ',1)[1]
+				os.remove('photo-{0}'.format(rand))
+				return False
+			else:
+				#os.remove('photo-{0}'.format(rand))
+				return True
+		except Exception, e:
+			print 'Caught socket exception:', e
+			os.remove('photo-{0}'.format(rand))
+			sock.close()
+			return False
+		except KeyboardInterrupt:
+			os.remove('photo-{0}'.format(rand))
+			sock.close()
+			return False
+
+
+
+	elif argc == 2 and argv[1] == 'hide':
+
+		try:
+			index = int(argv[2])
+		except:
+			index = 0
+
+		hostInfo = hp.ENUM_HOSTS[index]
+
+		# Get the service control URL and full service name
+		try:
+			controlURL = hostInfo['proto'] + hostInfo['name']
+		except Exception,e:
+			print 'Caught exception:',e
+			print "Are you sure you've run 'host get %d' and specified the correct service name?" % index
+			return False
+
+		host = hostInfo['name'].split(':')[0]
+
+		request = "GET /photo-viewing/stop? HTTP/1.1\r\n"\
+					"Host: " + hostInfo['name'] + '\r\n\r\n'
+		response = ''
+
+		# Send data and go into receive loop
+		try:
+			sock = socket(AF_INET,SOCK_STREAM)
+			# Not advertised
+			sock.connect((host,49159))
+			sock.send(request)
+			while True:
+				data = sock.recv(upnp.MAX_RECV)
+				if not data:
+					break
+				else:
+					response += data
+					print response
+					if response.count('\r\n\r\n') > 0:
+						break
+			sock.close()
+
+			(header,body) = response.split('\r\n\r\n',1)
+
+			if not header.upper().startswith('HTTP/1.1 200'):
+				print 'Show picture failed with error code:',header.split('\r\n')[0].split(' ',1)[1]
+				return False
+			else:
+				return True
+		except Exception, e:
+			print 'Caught socket exception:', e
+			sock.close()
+			return False
+		except KeyboardInterrupt:
+			sock.close()
+			return False
+
+	elif argc == 2 and argv[1] == 'flip':
+
+		showpic(3,('showpic','show','1.png'),hp)
+		showpic(3,('showpic','show','2.png'),hp)
+		showpic(3,('showpic','show','3.png'),hp)
+		showpic(3,('showpic','show','2.png'),hp)
+		showpic(3,('showpic','show','1.png'),hp)
+		showpic(3,('showpic','show','2.png'),hp)
+		showpic(3,('showpic','show','3.png'),hp)
+		showpic(3,('showpic','show','2.png'),hp)
+		showpic(3,('showpic','show','1.png'),hp)
+		showpic(3,('showpic','show','2.png'),hp)
+		showpic(3,('showpic','show','3.png'),hp)
+		showpic(3,('showpic','show','2.png'),hp)
+		showpic(3,('showpic','show','1.png'),hp)
+		showpic(2,('showpic','hide'),hp)
+		return True
+
+	else:
+		showHelp(argv[0])
+
+
+# Open log file
 def log(argc,argv,hp):
 	if argc == 2:
 		logFile = argv[1]
@@ -1281,7 +1500,7 @@ def log(argc,argv,hp):
 			for x in time.localtime():
 				ts.append(x)
 			theTime = "%d-%d-%d, %d:%d:%d" % (ts[0],ts[1],ts[2],ts[3],ts[4],ts[5])
-			hp.LOG_FILE.write("\n### Logging started at: %s ###\n" % theTime)
+			hp.LOG_FILE.write("\n# # #  Logging started at: %s # # # \n" % theTime)
 		except Exception, e:
 			print "Cannot write to file '%s': %s" % (logFile,e)
 			hp.LOG_FILE = False
@@ -1290,11 +1509,13 @@ def log(argc,argv,hp):
 		return
 	showHelp(argv[0])
 
-#Show help
+
+
+# Show help
 def help(argc,argv,hp):
 	showHelp(False)
 
-#Debug, disabled by default
+# Debug, disabled by default
 def debug(argc,argv,hp):
 	command = ''
 	if hp.DEBUG == False:
@@ -1308,11 +1529,12 @@ def debug(argc,argv,hp):
 		command = command.strip()
 		print eval(command)
 	return
-#Quit!
+
+# Quit!
 def exit(argc,argv,hp):
 	quit(argc,argv,hp)
 
-#Quit!
+# Quit!
 def quit(argc,argv,hp):
 	if argc == 2 and argv[1] == 'help':
 		showHelp(argv[0])
@@ -1321,11 +1543,11 @@ def quit(argc,argv,hp):
 	hp.cleanup()
 	sys.exit(0)
 
-################ End Action Functions ######################
+# # # # # # # # # # # # # # # #  End Action Functions # # # # # # # # # # # # # # # # # # # # # # 
 
-#Show command help
+# Show command help
 def showHelp(command):
-	#Detailed help info for each command
+	# Detailed help info for each command
 	helpInfo = {
 			'help' : {
 					'longListing':
@@ -1345,6 +1567,23 @@ def showHelp(command):
 							'\t%s',
 					'quickView':
 						'Send a control message to the Sky+HD Box'
+				},
+			'showpic' : {
+					'longListing':
+						'Description:\n'\
+							'\tShows a picture on a Sky+ box.\n\n'\
+						'Usage:\n'\
+							'\t%s show filename\n'\
+							"\tSpecifying 'show' will show the named file\n"\
+							"\tshowpic hide\n"\
+							"\tSpecifying 'hide' will hide the photo\n\n"\
+						'Example:\n'\
+							'\t> showpic show photo.jpg\n'\
+							'\t> show hide\n\n'\
+						'Notes:\n'\
+							"\to Should work with all photo types interpreted by PIL\n",
+					'quickView' :
+						'Show a picture on Sky+'
 				},
 			'quit' : {
 					'longListing' :
@@ -1370,7 +1609,7 @@ def showHelp(command):
 						'Description:\n'\
 							'\tSaves current host information to disk.\n\n'\
 						'Usage:\n'\
-							'\t%s <data | info <host#>> [file prefix]\n'\
+							'\t%s <data | info <host# >> [file prefix]\n'\
 							"\tSpecifying 'data' will save the raw host data to a file suitable for importing later via 'load'\n"\
 							"\tSpecifying 'info' will save data for the specified host in a human-readable format\n"\
 							"\tSpecifying a file prefix will save files in for format of 'struct_[prefix].mir' and info_[prefix].mir\n\n"\
@@ -1389,7 +1628,7 @@ def showHelp(command):
 						'Description:\n'\
 							'\tAllows you  to view and edit application settings.\n\n'\
 						'Usage:\n'\
-							'\t%s <show | uniq | debug | verbose | version <version #> | iface <interface> | socket <ip:port> >\n'\
+							'\t%s <show | uniq | debug | verbose | version <version # > | iface <interface> | socket <ip:port> >\n'\
 							"\t'show' displays the current program settings\n"\
 							"\t'uniq' toggles the show-only-uniq-hosts setting when discovering UPNP devices\n"\
 							"\t'debug' toggles debug mode\n"\
@@ -1425,7 +1664,7 @@ def showHelp(command):
 						'Description:\n'\
 							"\tAllows you to query host information and iteract with a host's actions/services.\n\n"\
 						'Usage:\n'\
-							'\t%s <list | get | info | summary | details | send> [host index #]\n'\
+							'\t%s <list | get | info | summary | details | send> [host index # ]\n'\
 							"\t'list' displays an index of all known UPNP hosts along with their respective index numbers\n"\
 							"\t'get' gets detailed information about the specified host\n"\
 							"\t'details' gets and displays detailed information about the specified host\n"\
@@ -1498,7 +1737,7 @@ def showHelp(command):
 		for command,cmdHelp in helpInfo.iteritems():
 			print "%s\t\t%s" % (command,cmdHelp['quickView'])
 
-#Display usage
+# Display usage
 def usage():
 	print '''
 Command line usage: %s [OPTIONS]
@@ -1513,7 +1752,7 @@ Command line usage: %s [OPTIONS]
 ''' % sys.argv[0]
 	sys.exit(1)
 
-#Check command line options
+# Check command line options
 def parseCliOpts(argc,argv,hp):
 	try:
 		opts,args = getopt.getopt(argv[1:],'s:l:i:udvh')
@@ -1546,7 +1785,7 @@ def parseCliOpts(argc,argv,hp):
 				interfaceName = None
 				found = False
 
-				#Get a list of network interfaces. This only works on unix boxes.
+				# Get a list of network interfaces. This only works on unix boxes.
 				try:
 					if thisSystem() != 'Windows':
 						fp = open('/proc/net/dev','r')
@@ -1575,14 +1814,15 @@ def parseCliOpts(argc,argv,hp):
 					if not hp.initSockets(False,False,interfaceName):
 						print 'Binding to interface %s failed; are you sure you have root privilages??' % interfaceName
 
-#Toggle boolean values
+
+# Toggle boolean values
 def toggleVal(val):
 	if val:
 		return False
 	else:
 		return True
 
-#Prompt for user input
+# Prompt for user input
 def getUserInput(hp,shellPrompt):
 	defaultShellPrompt = 'skyRemote> '
 	if shellPrompt == False:
@@ -1605,9 +1845,9 @@ def getUserInput(hp,shellPrompt):
 
 	return (argc,argv)
 
-#Main
+# Main
 def main(argc,argv):
-	#Table of valid commands - all primary commands must have an associated function
+	# Table of valid commands - all primary commands must have an associated function
 	appCommands = {
 			'help' : {
 				'help' : None
@@ -1668,27 +1908,32 @@ def main(argc,argv):
 			'debug': {
 				'command' : None,
 				'help'    : None
-				}
+				},
+			'showpic' : {
+				'show' : None,
+				'hide' : None,
+			    'flip' : None
+			}
 	}
 
-	#The load command should auto complete on the contents of the current directory
-        for file in os.listdir(os.getcwd()):
-                appCommands['load'][file] = None
+	# The load command should auto complete on the contents of the current directory
+	for file in os.listdir(os.getcwd()):
+		appCommands['load'][file] = None
 
-	#Initialize upnp class
+	# Initialize upnp class
 	hp = upnp(False,False,None,appCommands);
 
-	#Set up tab completion and command history
+	# Set up tab completion and command history
 	readline.parse_and_bind("tab: complete")
 	readline.set_completer(hp.completer.complete)
 
-	#Set some default values
+	# Set some default values
 	hp.UNIQ = True
 	hp.VERBOSE = False
 	action = False
 	funPtr = False
 
-	#Check command line options
+	# Check command line options
 	parseCliOpts(argc,argv,hp)
 	
 	skyFuncPtr = eval('pcap')
@@ -1699,16 +1944,16 @@ def main(argc,argv):
 	
 	print 'Ready for input. You can start with "control pause" and "control play"'
 
-	#Main loop
+	# Main loop
 	while True:
-		#Drop user into shell
+		# Drop user into shell
 		(argc,argv) = getUserInput(hp,False)
 		if argc == 0:
 			continue
 		action = argv[0]
 		funcPtr = False
 
-		#Parse actions
+		# Parse actions
 		try:
 			if appCommands.has_key(action):
 				funcPtr = eval(action)
